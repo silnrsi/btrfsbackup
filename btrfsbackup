@@ -99,14 +99,13 @@ case "$COMMAND" in
         exit 0
     fi
     $DEBUG sgdisk -Z
+    blockdev --rereadpt $DEV
     $DEBUG parted -s -a optimal -- $DEV mklabel gpt mkpart primary 0 4GB mkpart primary 4GB -1c || exit 1
     echo "Be ready to type your backup drive password lots of times!"
     $DEBUG cryptsetup --verify-passphrase luksFormat ${DEV}2 -c aes -s 256 -h sha256
     DEVMAPPER=`udisksctl unlock -b ${DEV}2 2>/dev/null | sed -e 's/^.*as \([^ ]\+\)\.$/\1/'`
     $DEBUG mkfs -t btrfs -d dup -L $DRIVENAME $DEVMAPPER
     echo "Now use Startup disk creator to create a startup disk on ${DEV}1"
-    sleep 2
-    blockdev --rereadpt $DEV
     udisksctl mount -b ${DEV}2
     ;&
 # fall through to init
