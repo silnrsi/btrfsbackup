@@ -1,0 +1,145 @@
+#!/bin/bash
+
+# This work is copyright 2015, SIL International (http://www.sil.org) and is made available
+# under the terms of the MIT license:
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+# backup drive volume name (no spaces)
+DRIVENAME="Backup"
+
+# any variation to the rsync command that does the backup
+#RSYNC_EXTRAS="--max-size=100M"
+
+if [ "$USER" == "root" ]; then
+    UNAME=$SUDO_USER
+else
+    UNAME=$USER
+fi
+
+COMMAND="backup"
+
+SUBVOL=$UNAME
+show_usage()
+{
+    echo "Usage: $0 [options] [action]"
+    echo "  Actions:"
+    echo "    new    - create a new backup drive"
+    echo "    init   - initialise a new subvolume"
+    echo "    backup - Execute a backup (opt)"
+    echo "  Options:"
+    echo "    -s --subvolume=   backup to subvolume. Defaults to $SUBVOL"
+    echo "    -v --volume=      backup to main volume. Defaults to $DRIVENAME"
+    echo "    -h --help         print this help"
+}
+
+for i in "$@"
+do
+case $i in
+  -s)
+    SUBVOL=$2
+    shift
+    ;;
+  --subvolume=*)
+    SUBVOL="${i#*=}"
+    ;;
+  -v)
+    DRIVENAME=$2
+    shift
+    ;;
+  --volume=*)
+    DRIVENAME="${i#*=}"
+    ;;
+  -h|--help)
+    show_usage
+    exit 2
+    ;;
+  *)
+    COMMAND="$i"
+    break
+    ;;
+esac
+shift
+done
+
+
+MOUNT=/media/$UNAME/$DRIVENAME
+BASE=$MOUNT/$SUBVOL
+
+DEBUG=
+#DEBUG=echo
+
+case "$COMMAND" in
+  new)
+    shift
+    DEV="$1"
+    if [ -z "$DEV" ]; then
+        echo "Please specify the drive device: e.g. $0 [opts] new /dev/sdc. Here is a list:"
+        udisksctl status
+        exit 0
+    fi
+    $DEBUG sgdisk -Z
+    $DEBUG parted -s -a optimal -- $DEV mklabel gpt mkpart primary 0 4GB mkpart primary 4GB -1c || exit 1
+    echo "Be ready to type your backup drive password lots of times!"
+    $DEBUG cryptsetup --verify-passphrase luksFormat ${DEV}2 -c aes -s 256 -h sha256
+    DEVMAPPER=`udisksctl unlock -b ${DEV}2 2>/dev/null | sed -e 's/^.*as \([^ ]\+\)\.$/\1/'`
+    $DEBUG mkfs -t btrfs -d dup -L $DRIVENAME $DEVMAPPER
+    udisksctl mount -b ${DEV}2
+    echo "Now use Startup disk creator to create a startup disk on ${DEV}1"
+    blockdev --rereadpt $DEV
+    ;&
+# fall through to init
+
+  init)
+    if btrfs subvolume show $BASE/backup > /dev/null 2>&1 ; then
+        echo "Backup volume already initialised" 
+        exit 1
+    fi
+    $DEBUG btrfs subvolume create $BASE
+    $DEBUG btrfs subvolume create $BASE/backup
+    $DEBUG mkdir $BASE/snapshots
+    # setup default lesser backup
+    if [ ! -e /.rsync-filter ] ; then
+        echo "+ /home/" > /.rsync-filter
+        echo "+ /var/***" >> /.rsync-filter
+        echo "+ /etc/***" >> /.rsync-filter
+        echo "+ /opt/***" >> /.rsync-filter
+        echo "+ /root/***" >> /.rsync-filter
+        echo "- /home/.ecryptfs/" >> /.rsync-filter
+        echo "- /home/*/.gvfs/" >> /.rsync-filter
+        echo "- /home/*/.cache/" >> /.rsync-filter
+        echo "- lost+found/" >> /.rsync-filter
+        echo "- /*/" >> /.rsync-filter
+    fi
+    exit 0
+    ;;
+
+  backup)
+    if ! $DEBUG mount -o remount,compress-force=lzo,noatime $MOUNT ||
+       ! btrfs subvolume show $BASE/backup > /dev/null 2>&1 ; then
+            echo "Backup drive not mounted. Do you need to initialise it?"
+            exit 1
+    fi
+
+    $DEBUG dpkg --get-selections > ~/dpkg_selections.txt
+    $DEBUG ionice -c 3 rsync -aFHAX --inplace $RSYNC_EXTRAS --info=progress2 --del / $BASE/backup
+    $DEBUG btrfs subvolume snapshot $BASE/backup $BASE/snapshots/snap-`date +%F-%H-%M`
+    ;;
+esac
+
