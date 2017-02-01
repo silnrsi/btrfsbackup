@@ -78,9 +78,7 @@ esac
 shift
 done
 
-
 MOUNT=/media/$UNAME/$DRIVENAME
-BASE=$MOUNT/$SUBVOL
 
 DEBUG=
 #DEBUG=echo
@@ -107,16 +105,20 @@ case "$COMMAND" in
     DEVMAPPERID=`udisksctl info -b ${DEVMAPPER} | sed -n -e 's/^\s*Symlinks:\s*//p'`
     echo "Now use Startup disk creator to create a startup disk on ${DEV}1"
     MOUNT=`udisksctl mount -b ${DEVMAPPERID} | sed -e 's/^.*at \(.\+\)\.$/\1/'`
+    if [ -z "$MOUNT" ]; then
+        echo "Failed to mount. Please unplug and replug the drive to mount it and run $0 init"
+        exit 0
+    fi
     ;&   # fall through to init
 
   init)
-    if btrfs subvolume show $BASE/backup > /dev/null 2>&1 ; then
+    if btrfs subvolume show $MOUNT/$SUBVOL/backup > /dev/null 2>&1 ; then
         echo "Backup volume already initialised" 
         exit 1
     fi
     $DEBUG btrfs subvolume create $MOUNT/$SUBVOL
     $DEBUG btrfs subvolume create $MOUNT/$SUBVOL/backup
-    $DEBUG mkdir $BASE/snapshots
+    $DEBUG mkdir $MOUNT/$SUBVOL/snapshots
     # setup default lesser backup
     if [ ! -e /.rsync-filter ] ; then
         echo "+ /home/" > /.rsync-filter
@@ -135,7 +137,7 @@ case "$COMMAND" in
 
   backup)
     if ! $DEBUG mount -o remount,compress-force=lzo,noatime $MOUNT ||
-       ! btrfs subvolume show $BASE/backup > /dev/null 2>&1 ; then
+       ! btrfs subvolume show $MOUNT/$SUBVOL/backup > /dev/null 2>&1 ; then
             echo "Backup drive not mounted. Do you need to initialise it?"
             exit 1
     fi
