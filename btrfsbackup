@@ -98,25 +98,23 @@ case "$COMMAND" in
         echo "Device mounted, please unmount. I wouldn't want to wipe your root drive"
         exit 0
     fi
-    $DEBUG sgdisk -Z
-    blockdev --rereadpt $DEV
+    $DEBUG sgdisk -Z $DEV
     $DEBUG parted -s -a optimal -- $DEV mklabel gpt mkpart primary 0 4GB mkpart primary 4GB -1c || exit 1
     echo "Be ready to type your backup drive password lots of times!"
     $DEBUG cryptsetup --verify-passphrase luksFormat ${DEV}2 -c aes -s 256 -h sha256
     DEVMAPPER=`udisksctl unlock -b ${DEV}2 2>/dev/null | sed -e 's/^.*as \([^ ]\+\)\.$/\1/'`
     $DEBUG mkfs -t btrfs -d dup -L $DRIVENAME $DEVMAPPER
     echo "Now use Startup disk creator to create a startup disk on ${DEV}1"
-    udisksctl mount -b ${DEV}2
-    ;&
-# fall through to init
+    MOOUNT=`udisksctl mount -b ${DEVMAPPER}` | sed -e 's/^.*at \(.\+)\.$/\1/'
+    ;&   # fall through to init
 
   init)
     if btrfs subvolume show $BASE/backup > /dev/null 2>&1 ; then
         echo "Backup volume already initialised" 
         exit 1
     fi
-    $DEBUG btrfs subvolume create $BASE
-    $DEBUG btrfs subvolume create $BASE/backup
+    $DEBUG btrfs subvolume create $MOUNT/$SUBVOL
+    $DEBUG btrfs subvolume create $MOUNT/$SUBVOL/backup
     $DEBUG mkdir $BASE/snapshots
     # setup default lesser backup
     if [ ! -e /.rsync-filter ] ; then
@@ -142,8 +140,8 @@ case "$COMMAND" in
     fi
 
     $DEBUG dpkg --get-selections > ~/dpkg_selections.txt
-    $DEBUG ionice -c 3 rsync -aFHAX --inplace $RSYNC_EXTRAS --info=progress2 --del / $BASE/backup
-    $DEBUG btrfs subvolume snapshot $BASE/backup $BASE/snapshots/snap-`date +%F-%H-%M`
+    $DEBUG ionice -c 3 rsync -aFHAX --inplace $RSYNC_EXTRAS --info=progress2 --del / $MOUNT/$SUBVOL/backup
+    $DEBUG btrfs subvolume snapshot $MOUNT/$SUBVOL/backup $MOUNT/$SUBVOL/snapshots/snap-`date +%F-%H-%M`
     ;;
 esac
 
