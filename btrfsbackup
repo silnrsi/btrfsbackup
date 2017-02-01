@@ -104,8 +104,9 @@ case "$COMMAND" in
     $DEBUG cryptsetup --verify-passphrase luksFormat ${DEV}2 -c aes -s 256 -h sha256
     DEVMAPPER=`udisksctl unlock -b ${DEV}2 2>/dev/null | sed -e 's/^.*as \([^ ]\+\)\.$/\1/'`
     $DEBUG mkfs -t btrfs -d dup -L $DRIVENAME $DEVMAPPER
+    DEVMAPPERID=`udisksctl info -b ${DEVMAPPER} | sed -n -e 's/^\s*Symlinks:\s*//p'`
     echo "Now use Startup disk creator to create a startup disk on ${DEV}1"
-    MOOUNT=`udisksctl mount -b ${DEVMAPPER}` | sed -e 's/^.*at \(.\+)\.$/\1/'
+    MOUNT=`udisksctl mount -b ${DEVMAPPERID} | sed -e 's/^.*at \(.\+\)\.$/\1/'`
     ;&   # fall through to init
 
   init)
