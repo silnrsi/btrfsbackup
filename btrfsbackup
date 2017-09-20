@@ -88,22 +88,30 @@ case "$COMMAND" in
     shift
     DEV="$1"
     if [ -z "$DEV" ]; then
-        echo "Please specify the drive device: e.g. $0 [opts] new /dev/sdc. Here is a list:"
+        echo "Please specify the drive device: e.g. $0 [opts] new /dev/sdc. You may also specify"
+        echo "a particular partition as in /dev/sdc1 if you have manually partitioned your drive."
+        echo "Here is a list of known drives:"
         udisksctl status
         exit 0
     fi
-    if mount | grep ^$DEV; then
-        echo "Device mounted, please unmount. I wouldn't want to wipe your root drive"
-        exit 0
-    fi
-    $DEBUG sgdisk -Z $DEV
-    $DEBUG parted -s -a optimal -- $DEV mklabel gpt mkpart primary 0 4GB mkpart primary 4GB -1c || exit 1
+    case $DEV in
+        *[0-9]) PART=$DEV ;;
+        *)
+            if mount | grep ^$DEV; then
+                echo "Device mounted, please unmount. I wouldn't want to wipe your root drive"
+                exit 0
+            fi
+            $DEBUG sgdisk -Z $DEV
+            $DEBUG parted -s -a optimal -- $DEV mklabel gpt mkpart primary 0 4GB mkpart primary 4GB -1c || exit 1
+            PART=${DEV}2
+            ;;
+    esac
     echo "Be ready to type your backup drive password lots of times!"
-    $DEBUG cryptsetup --verify-passphrase luksFormat ${DEV}2 -c aes -s 256 -h sha256
-    DEVMAPPER=`udisksctl unlock -b ${DEV}2 2>/dev/null | sed -e 's/^.*as \([^ ]\+\)\.$/\1/'`
+    $DEBUG cryptsetup --verify-passphrase luksFormat ${PART} -c aes -s 256 -h sha256
+    DEVMAPPER=`udisksctl unlock -b ${PART} 2>/dev/null | sed -e 's/^.*as \([^ ]\+\)\.$/\1/'`
     $DEBUG mkfs -t btrfs -d dup -L $DRIVENAME $DEVMAPPER
     DEVMAPPERID=`udisksctl info -b ${DEVMAPPER} | sed -n -e 's/^\s*Symlinks:\s*//p'`
-    echo "Now use Startup disk creator to create a startup disk on ${DEV}1"
+    echo "Now use Startup disk creator to create a startup disk on ${PART}"
     MOUNT=`udisksctl mount -b ${DEVMAPPERID} | sed -e 's/^.*at \(.\+\)\.$/\1/'`
     if [ -z "$MOUNT" ]; then
         echo "Failed to mount. Please unplug and replug the drive to mount it and run $0 init"
