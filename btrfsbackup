@@ -49,33 +49,33 @@ show_usage()
     echo "    -h --help         print this help"
 }
 
-for i in "$@"
-do
-case $i in
-  -s)
-    SUBVOL=$2
+while [ $# -ge 1 ]; do 
+    i=$1;
+    case $i in
+      -s)
+        SUBVOL=$2
+        shift
+        ;;
+      --subvolume=*)
+        SUBVOL="${i#*=}"
+        ;;
+      -v)
+        DRIVENAME=$2
+        shift
+        ;;
+      --volume=*)
+        DRIVENAME="${i#*=}"
+        ;;
+      -h|--help)
+        show_usage
+        exit 2
+        ;;
+      *)
+        COMMAND="$i"
+        break
+        ;;
+    esac
     shift
-    ;;
-  --subvolume=*)
-    SUBVOL="${i#*=}"
-    ;;
-  -v)
-    DRIVENAME=$2
-    shift
-    ;;
-  --volume=*)
-    DRIVENAME="${i#*=}"
-    ;;
-  -h|--help)
-    show_usage
-    exit 2
-    ;;
-  *)
-    COMMAND="$i"
-    break
-    ;;
-esac
-shift
 done
 
 MOUNT=/media/$UNAME/$DRIVENAME
@@ -152,7 +152,10 @@ case "$COMMAND" in
 
     $DEBUG dpkg --get-selections > ~/dpkg_selections.txt
     $DEBUG ionice -c 3 rsync -aFHAX --inplace $RSYNC_EXTRAS --info=progress2 --del / $MOUNT/$SUBVOL/backup
-    $DEBUG btrfs subvolume snapshot $MOUNT/$SUBVOL/backup $MOUNT/$SUBVOL/snapshots/snap-`date +%F-%H-%M`
+    if [ $? -ne 20 ]; then  # person interrupted the backup
+        $DEBUG btrfs subvolume snapshot $MOUNT/$SUBVOL/backup $MOUNT/$SUBVOL/snapshots/snap-`date +%F-%H-%M`
+    fi
+    sync -f $MOUNT
     ;;
 esac
 
